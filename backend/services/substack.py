@@ -171,13 +171,9 @@ async def _execute_comp(
     logger.info("After hover — url=%s rowLinks=%s rowButtons=%s",
                 hover_debug['url'], hover_debug['rowLinks'], hover_debug['rowButtons'])
 
-    # Step 7: Navigate into subscriber detail — prefer link in row, else click row
-    row_links = hover_debug.get('rowLinks', [])
-    if row_links:
-        await subscriber_row.locator('a').first.click()
-        logger.info("Clicked subscriber link: %s", row_links[0])
-    else:
-        await subscriber_row.click()
+    # Step 7: Click the hover-revealed management button (class root-ke3ITh, appears on row hover)
+    mgmt_button = subscriber_row.locator('button[class*="root-ke3ITh"]').first
+    await mgmt_button.click(timeout=5000)
     await page.wait_for_timeout(2000)
 
     # Debug after navigation/click — look for dialog and any comp/grant buttons

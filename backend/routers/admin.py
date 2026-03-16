@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_api_key
 from database import get_db
-from models import Payment, PaymentStatus, Subscriber, SubstackStatus
-from schemas import PaymentRead
+from models import Action, ExecutionStatus, Payment, PaymentStatus, Subscriber, SubstackStatus
+from schemas import ActionRead, PaymentRead
 from services.subscriber_sync import process_csv
 from services.subscription import calculate_subscription
+from services.substack import execute_substack_action
 
 logger = logging.getLogger(__name__)
 
@@ -122,3 +123,25 @@ async def resolve_payment(
     background_tasks.add_task(calculate_subscription, payment.id)
 
     return PaymentRead.model_validate(payment)
+
+
+@router.post("/retry-action/{action_id}", response_model=ActionRead)
+async def retry_action(
+    action_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(require_api_key),
+):
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    action.execution_status = ExecutionStatus.pending
+    action.failure_reason = None
+    await db.commit()
+    await db.refresh(action)
+
+    background_tasks.add_task(execute_substack_action, action.id)
+
+    return ActionRead.model_validate(action)

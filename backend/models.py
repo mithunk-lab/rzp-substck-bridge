@@ -61,6 +61,8 @@ class Payment(Base):
         Enum(PaymentStatus), nullable=False, default=PaymentStatus.pending
     )
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_match_email: Mapped[str | None] = mapped_column(String, nullable=True)
+    suggested_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
@@ -135,3 +137,13 @@ class ClarificationEmail(Base):
     resolved_by_email: Mapped[str | None] = mapped_column(String, nullable=True)
 
     payment: Mapped["Payment"] = relationship("Payment", back_populates="clarification_emails")
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )

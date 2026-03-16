@@ -37,3 +37,6 @@ frontend/dist/
 # Logs
 *.log
 backend/logs/*.log
+
+# Screenshots (keep directory, ignore generated files)
+backend/screenshots/*.png

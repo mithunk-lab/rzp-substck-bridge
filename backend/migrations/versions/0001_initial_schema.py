@@ -58,7 +58,7 @@ def upgrade() -> None:
         sa.Column("payment_timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(
+            postgresql.ENUM(
                 "pending", "auto_resolved", "needs_review", "unknown", "completed", "failed",
                 name="paymentstatus",
                 create_type=False,
@@ -67,6 +67,8 @@ def upgrade() -> None:
             server_default="pending",
         ),
         sa.Column("resolution_notes", sa.Text(), nullable=True),
+        sa.Column("suggested_match_email", sa.String(), nullable=True),
+        sa.Column("suggested_match_score", sa.Integer(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -89,7 +91,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=False),
         sa.Column(
             "substack_status",
-            sa.Enum("active", "lapsed", "lifetime", name="substackstatus", create_type=False),
+            postgresql.ENUM("active", "lapsed", "lifetime", name="substackstatus", create_type=False),
             nullable=False,
         ),
         sa.Column("expiry_date", sa.Date(), nullable=True),
@@ -123,7 +125,7 @@ def upgrade() -> None:
         sa.Column("is_lifetime", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column(
             "execution_status",
-            sa.Enum("pending", "success", "failed", "manual", name="executionstatus", create_type=False),
+            postgresql.ENUM("pending", "success", "failed", "manual", name="executionstatus", create_type=False),
             nullable=False,
             server_default="pending",
         ),
@@ -160,8 +162,22 @@ def upgrade() -> None:
         sa.Column("resolved_by_email", sa.String(), nullable=True),
     )
 
+    # --- settings ---
+    op.create_table(
+        "settings",
+        sa.Column("key", sa.String(), primary_key=True),
+        sa.Column("value", sa.Text(), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("settings")
     op.drop_table("clarification_emails")
     op.drop_table("actions")
     op.drop_table("subscribers")

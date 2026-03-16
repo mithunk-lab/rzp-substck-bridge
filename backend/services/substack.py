@@ -139,10 +139,23 @@ async def _execute_comp(
     await page.wait_for_load_state("networkidle")
     await page.wait_for_timeout(1000)
 
-    # Debug: log URL and page body snippet so we can inspect structure in logs
+    # Debug: find all leaf elements containing the email to identify the correct selector
     logger.info("Page URL after search: %s", page.url)
-    body_html = await page.inner_html("body")
-    logger.info("Page body snippet (first 3000 chars): %s", body_html[:3000])
+    elements = await page.evaluate(f"""
+        Array.from(document.querySelectorAll('*')).filter(el =>
+            el.children.length === 0 &&
+            el.textContent.includes('{action.subscriber_email}')
+        ).map(el => ({{
+            tag: el.tagName,
+            classes: el.className,
+            text: el.textContent.trim().slice(0, 80),
+            parentTag: el.parentElement ? el.parentElement.tagName : null,
+            parentClasses: el.parentElement ? el.parentElement.className : null,
+            grandparentTag: el.parentElement && el.parentElement.parentElement ? el.parentElement.parentElement.tagName : null,
+            grandparentClasses: el.parentElement && el.parentElement.parentElement ? el.parentElement.parentElement.className : null,
+        }}))
+    """)
+    logger.info("Elements containing email (%d found): %s", len(elements), elements)
 
     # Step 5: Locate subscriber row in results
     # Try table row first, then fall back to any cell/div containing the email

@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from uuid import UUID
@@ -150,12 +150,15 @@ async def _execute_comp(
     await page.locator('button[aria-label="Ellipsis"]').first.click(timeout=5000)
     await page.wait_for_timeout(1000)
 
-    # Step 7: Click "Comp subscription" in the dropdown menu
-    comp_menu_item = page.locator('[role="menuitem"]:has-text("Comp subscription")').first
+    # Step 7: Click the appropriate option in the dropdown menu
+    # Free subscriber → "Comp"  |  Already-comped subscriber → "Extend subscription"
+    comp_menu_item = page.locator(
+        '[role="menuitem"]:has-text("Comp"), [role="menuitem"]:has-text("Extend subscription")'
+    ).first
     if not await comp_menu_item.is_visible(timeout=5000):
         await _fail_action(
             action, page, db,
-            "Comp subscription option not available in subscriber menu — subscriber may already be comped or on paid plan",
+            "Neither Comp nor Extend subscription option found in subscriber menu",
         )
         return
     await comp_menu_item.click()
@@ -178,18 +181,39 @@ async def _execute_comp(
         await _upsert_setting(db, "last_executor_status", "manual")
         return
 
-    # Step 9: Fill in comp duration
+    # Step 9: Select duration in the dialog dropdown
+    # The dialog has preset options; fall back to "Other" + date input for custom durations.
+    _DURATION_PRESETS = {7: '7 days', 30: '30 days', 90: '90 days', 180: '6 months', 365: '1 year'}
     if action.is_lifetime:
-        await page.locator(
-            'input[value="forever"], label:has-text("Forever"), label:has-text("Lifetime")'
-        ).first.click()
+        target_label = 'Forever'
     else:
-        await page.locator('input[type="number"]').first.fill(str(action.comp_days))
+        target_label = _DURATION_PRESETS.get(action.comp_days, 'Other')
 
-    # Step 10: Confirm
+    # Try native <select> first; fall back to custom dropdown (click trigger → click option)
+    select_el = page.locator('select')
+    if await select_el.count() > 0:
+        await select_el.first.select_option(label=target_label)
+    else:
+        await page.locator('[role="combobox"], [aria-haspopup="listbox"]').first.click()
+        await page.wait_for_timeout(500)
+        await page.locator(
+            f'[role="option"]:has-text("{target_label}"), li:has-text("{target_label}")'
+        ).first.click()
+
+    # For "Other": a date input appears — fill with target date (today + comp_days)
+    if target_label == 'Other':
+        await page.wait_for_timeout(500)
+        target_date = date.today() + timedelta(days=action.comp_days)
+        await page.locator('input[type="date"]').first.fill(target_date.isoformat())
+        await page.wait_for_timeout(300)
+
+    # Step 10: Confirm — button text is dynamic ("Extend until …" / "Comp until …")
     await page.locator(
-        'button[type="submit"]:visible, button:has-text("Comp"):visible, button:has-text("Confirm"):visible'
-    ).last.click()
+        'button:has-text("Extend until"), '
+        'button:has-text("Comp until"), '
+        'button:has-text("Grant"), '
+        'button[type="submit"]'
+    ).last.click(timeout=5000)
     await page.wait_for_timeout(2000)
 
     screenshot_path = await _take_screenshot(page, action.id, "success")

@@ -19,21 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # --- Enum types ---
-    payment_status_enum = postgresql.ENUM(
-        "pending", "auto_resolved", "needs_review", "unknown", "completed", "failed",
-        name="paymentstatus",
-    )
-    substack_status_enum = postgresql.ENUM(
-        "active", "lapsed", "lifetime",
-        name="substackstatus",
-    )
-    execution_status_enum = postgresql.ENUM(
-        "pending", "success", "failed", "manual",
-        name="executionstatus",
-    )
-    payment_status_enum.create(op.get_bind(), checkfirst=True)
-    substack_status_enum.create(op.get_bind(), checkfirst=True)
-    execution_status_enum.create(op.get_bind(), checkfirst=True)
+    op.execute("CREATE TYPE IF NOT EXISTS paymentstatus AS ENUM ('pending', 'auto_resolved', 'needs_review', 'unknown', 'completed', 'failed')")
+    op.execute("CREATE TYPE IF NOT EXISTS substackstatus AS ENUM ('active', 'lapsed', 'lifetime')")
+    op.execute("CREATE TYPE IF NOT EXISTS executionstatus AS ENUM ('pending', 'success', 'failed', 'manual')")
 
     # --- payments ---
     op.create_table(
@@ -55,6 +43,7 @@ def upgrade() -> None:
             sa.Enum(
                 "pending", "auto_resolved", "needs_review", "unknown", "completed", "failed",
                 name="paymentstatus",
+                create_type=False,
             ),
             nullable=False,
             server_default="pending",
@@ -82,7 +71,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=False),
         sa.Column(
             "substack_status",
-            sa.Enum("active", "lapsed", "lifetime", name="substackstatus"),
+            sa.Enum("active", "lapsed", "lifetime", name="substackstatus", create_type=False),
             nullable=False,
         ),
         sa.Column("expiry_date", sa.Date(), nullable=True),
@@ -116,7 +105,7 @@ def upgrade() -> None:
         sa.Column("is_lifetime", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column(
             "execution_status",
-            sa.Enum("pending", "success", "failed", "manual", name="executionstatus"),
+            sa.Enum("pending", "success", "failed", "manual", name="executionstatus", create_type=False),
             nullable=False,
             server_default="pending",
         ),

@@ -5,7 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/dashboard': 'http://localhost:8000',
+      '/admin': 'http://localhost:8000',
+      '/webhooks': 'http://localhost:8000',
+      '/screenshots': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
     },
   },
 })

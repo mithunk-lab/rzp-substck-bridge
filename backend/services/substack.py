@@ -49,40 +49,55 @@ async def _run_executor(action_id: UUID, db: AsyncSession) -> None:
     publication_url = os.getenv("SUBSTACK_PUBLICATION_URL", "").rstrip("/")
     session_cookie = os.getenv("SUBSTACK_SESSION_COOKIE", "")
 
+    if not publication_url or not session_cookie:
+        action.execution_status = ExecutionStatus.failed
+        action.failure_reason = "SUBSTACK_PUBLICATION_URL or SUBSTACK_SESSION_COOKIE not configured"
+        await db.commit()
+        await _upsert_setting(db, "last_executor_status", "failed")
+        logger.error("Executor misconfigured for action %s: missing env vars", action_id)
+        return
+
     parsed = urlparse(publication_url)
     domain = parsed.hostname or "substack.com"
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
-        context = await browser.new_context()
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=headless)
+            context = await browser.new_context()
 
-        # Inject session cookie — no login flow
-        # Cookie name varies by setup: custom-domain publications use connect.sid
-        cookie_name = os.getenv("SUBSTACK_SESSION_COOKIE_NAME", "connect.sid")
-        await context.add_cookies([
-            {
-                "name": cookie_name,
-                "value": session_cookie,
-                "domain": domain,
-                "path": "/",
-                "httpOnly": True,
-                "secure": True,
-            }
-        ])
+            # Inject session cookie — no login flow
+            # Cookie name varies by setup: custom-domain publications use connect.sid
+            cookie_name = os.getenv("SUBSTACK_SESSION_COOKIE_NAME", "connect.sid")
+            await context.add_cookies([
+                {
+                    "name": cookie_name,
+                    "value": session_cookie,
+                    "domain": domain,
+                    "path": "/",
+                    "httpOnly": True,
+                    "secure": True,
+                }
+            ])
 
-        page = await context.new_page()
+            page = await context.new_page()
 
-        try:
-            await _execute_comp(action, page, db, publication_url)
-        except Exception as exc:
-            logger.error(
-                "Substack executor unexpected error for action %s",
-                action_id,
-                exc_info=True,
-            )
-            await _fail_action(action, page, db, f"Unexpected error: {exc}")
-        finally:
-            await browser.close()
+            try:
+                await _execute_comp(action, page, db, publication_url)
+            except Exception as exc:
+                logger.error(
+                    "Substack executor unexpected error for action %s",
+                    action_id,
+                    exc_info=True,
+                )
+                await _fail_action(action, page, db, f"Unexpected error: {exc}")
+            finally:
+                await browser.close()
+    except Exception as exc:
+        action.execution_status = ExecutionStatus.failed
+        action.failure_reason = f"Browser launch failed: {exc}"
+        await db.commit()
+        await _upsert_setting(db, "last_executor_status", "failed")
+        logger.error("Browser launch failed for action %s: %s", action_id, exc, exc_info=True)
 
 
 # ── Core comp flow ────────────────────────────────────────────────────────────

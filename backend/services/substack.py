@@ -152,47 +152,60 @@ async def _execute_comp(
         )
         return
 
-    # Step 6: Hover over the row to reveal hover-state action buttons
-    await subscriber_row.hover()
-    await page.wait_for_timeout(1500)
+    # Step 6: Extract subscriber user_id from window._preloads, then navigate to their detail page
+    preload_data = await page.evaluate(f"""
+        (() => {{
+            try {{
+                const p = window._preloads;
+                if (!p) return {{ error: 'no _preloads' }};
+                // Try common locations for subscriber list data
+                const candidates = [
+                    p.pageData,
+                    p.pageData && p.pageData.subscriptions,
+                    p.pageData && p.pageData.subscribers,
+                    p.pageData && p.pageData.rows,
+                ];
+                for (const list of candidates) {{
+                    if (!Array.isArray(list)) continue;
+                    const match = list.find(s =>
+                        (s.email === '{action.subscriber_email}') ||
+                        (s.user && s.user.email === '{action.subscriber_email}')
+                    );
+                    if (match) return {{ found: true, id: match.id, userId: match.user_id || (match.user && match.user.id), email: match.email || (match.user && match.user.email), keys: Object.keys(match) }};
+                }}
+                return {{ found: false, pageDataKeys: p.pageData ? Object.keys(p.pageData) : 'no pageData', preloadKeys: Object.keys(p) }};
+            }} catch(e) {{ return {{ error: e.message }}; }}
+        }})()
+    """)
+    logger.info("Preload subscriber data: %s", preload_data)
 
-    hover_debug = await page.evaluate("""
+    # Navigate to subscriber detail page using extracted ID
+    sub_id = preload_data.get('userId') or preload_data.get('id')
+    if sub_id:
+        await page.goto(f"{publication_url}/publish/subscriber/{sub_id}", wait_until="networkidle")
+        await page.wait_for_timeout(2000)
+        logger.info("Navigated to subscriber detail page for id=%s url=%s", sub_id, page.url)
+    else:
+        logger.warning("Could not extract subscriber ID from preloads — falling back to row click")
+        await subscriber_row.click()
+        await page.wait_for_timeout(2000)
+
+    # Step 7: Find comp action on detail page / panel
+    post_nav = await page.evaluate("""
         (() => {
             const isVisible = el => {
                 const s = getComputedStyle(el);
                 return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
             };
-            const row = document.querySelector('tr[class*="tr-"]');
-            const rowLinks = row ? Array.from(row.querySelectorAll('a')).map(a => ({ href: a.href, text: a.textContent.trim().slice(0, 60) })) : [];
-            const rowButtons = row ? Array.from(row.querySelectorAll('button')).map(b => ({ text: b.textContent.trim().slice(0, 60), ariaLabel: b.getAttribute('aria-label'), classes: b.className.slice(0, 100) })) : [];
-            return { rowLinks, rowButtons, url: window.location.href };
+            const allButtons = Array.from(document.querySelectorAll('button, a'))
+                .filter(isVisible)
+                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 80) }));
+            const compButtons = allButtons.filter(b => /comp|grant/i.test(b.text + (b.ariaLabel || '')));
+            return { url: window.location.href, compButtons, allButtonCount: allButtons.length, sample: allButtons.slice(0, 10) };
         })()
     """)
-    logger.info("After hover — url=%s rowLinks=%s rowButtons=%s",
-                hover_debug['url'], hover_debug['rowLinks'], hover_debug['rowButtons'])
-
-    # Step 7: Click the hover-revealed management button (class root-ke3ITh, appears on row hover)
-    mgmt_button = subscriber_row.locator('button[class*="root-ke3ITh"]').first
-    await mgmt_button.click(timeout=5000)
-    await page.wait_for_timeout(2000)
-
-    # Debug after navigation/click — look for dialog and any comp/grant buttons
-    post_click = await page.evaluate("""
-        (() => {
-            const isVisible = el => {
-                const s = getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
-            };
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
-                .map(el => ({ tag: el.tagName, classes: el.className.slice(0, 100), text: el.textContent.trim().slice(0, 300) }));
-            const compButtons = Array.from(document.querySelectorAll('button, a'))
-                .filter(el => isVisible(el) && /comp|grant/i.test(el.textContent + (el.getAttribute('aria-label') || '')))
-                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 100) }));
-            return { url: window.location.href, dialogs, compButtons };
-        })()
-    """)
-    logger.info("After row action — url=%s dialogs=%s compButtons=%s",
-                post_click['url'], post_click['dialogs'], post_click['compButtons'])
+    logger.info("After navigation — url=%s compButtons=%s allButtonCount=%s sample=%s",
+                post_nav['url'], post_nav['compButtons'], post_nav['allButtonCount'], post_nav['sample'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

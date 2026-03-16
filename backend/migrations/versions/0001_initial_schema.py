@@ -18,10 +18,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # --- Enum types ---
-    op.execute("CREATE TYPE IF NOT EXISTS paymentstatus AS ENUM ('pending', 'auto_resolved', 'needs_review', 'unknown', 'completed', 'failed')")
-    op.execute("CREATE TYPE IF NOT EXISTS substackstatus AS ENUM ('active', 'lapsed', 'lifetime')")
-    op.execute("CREATE TYPE IF NOT EXISTS executionstatus AS ENUM ('pending', 'success', 'failed', 'manual')")
+    # --- Enum types (idempotent: skip if already exists) ---
+    op.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'paymentstatus') THEN
+                CREATE TYPE paymentstatus AS ENUM ('pending', 'auto_resolved', 'needs_review', 'unknown', 'completed', 'failed');
+            END IF;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'substackstatus') THEN
+                CREATE TYPE substackstatus AS ENUM ('active', 'lapsed', 'lifetime');
+            END IF;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'executionstatus') THEN
+                CREATE TYPE executionstatus AS ENUM ('pending', 'success', 'failed', 'manual');
+            END IF;
+        END $$;
+    """)
 
     # --- payments ---
     op.create_table(

@@ -108,6 +108,8 @@ async def _tier2_fuzzy_name(payment: Payment, db: AsyncSession) -> bool:
     payment.resolution_notes = (
         f"Fuzzy match: {best_subscriber.name} (score: {best_score})"
     )
+    payment.suggested_match_email = best_subscriber.email
+    payment.suggested_match_score = best_score
     await db.commit()
 
     logger.info(

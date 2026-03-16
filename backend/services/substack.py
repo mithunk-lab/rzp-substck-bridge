@@ -140,40 +140,8 @@ async def _execute_comp(
     # Give React time to hydrate the subscriber list into the DOM
     await page.wait_for_timeout(3000)
 
-    # Debug: log all table rows and list items to identify the correct selector
-    logger.info("Page URL after search: %s", page.url)
-    structure = await page.evaluate(f"""
-        (() => {{
-            const email = '{action.subscriber_email}';
-            // All tr/li/div rows that might be subscriber rows
-            const rows = Array.from(document.querySelectorAll('tr, li, [class*="row"], [class*="subscriber"]'));
-            const matching = rows.filter(el => el.textContent.includes(email));
-            const sample = rows.slice(0, 5);  // first 5 rows regardless of match
-            return {{
-                matchingRows: matching.map(el => ({{
-                    tag: el.tagName,
-                    classes: el.className,
-                    text: el.textContent.trim().slice(0, 120),
-                    childTags: Array.from(el.children).map(c => c.tagName + '.' + c.className).slice(0, 5),
-                }})),
-                sampleRows: sample.map(el => ({{
-                    tag: el.tagName,
-                    classes: el.className,
-                    text: el.textContent.trim().slice(0, 80),
-                }})),
-                emailInDom: document.body.innerText.includes(email),
-            }};
-        }})()
-    """)
-    logger.info("DOM structure debug: %s", structure)
-
-    # Step 5: Locate subscriber row in results
-    subscriber_row = page.locator(
-        f'tr:has-text("{action.subscriber_email}"), '
-        f'li:has-text("{action.subscriber_email}"), '
-        f'[class*="row"]:has-text("{action.subscriber_email}"), '
-        f'[class*="subscriber"]:has-text("{action.subscriber_email}")'
-    ).first
+    # Step 5: Locate subscriber row — Substack renders results as <tr class="tr-jyGCha ...">
+    subscriber_row = page.locator(f'tr:has-text("{action.subscriber_email}")').first
 
     if not await subscriber_row.is_visible(timeout=8000):
         await _fail_action(

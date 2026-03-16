@@ -152,58 +152,51 @@ async def _execute_comp(
         )
         return
 
-    # Step 6: Open subscriber management panel — click the first (email) cell, not the whole row
-    email_cell = subscriber_row.locator('td').first
-    await email_cell.click()
-    await page.wait_for_timeout(2000)
-
-    # Debug: URL change + any dialog/panel + all visible text containing "comp"
-    panel_debug = await page.evaluate(f"""
-        (() => {{
-            const isVisible = el => {{
-                const s = getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
-            }};
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="drawer"], [class*="panel"], [class*="flyout"], [class*="sheet"]'))
-                .map(el => ({{ tag: el.tagName, classes: el.className.slice(0, 100), text: el.textContent.trim().slice(0, 200) }}));
-            const compButtons = Array.from(document.querySelectorAll('button, a'))
-                .filter(el => isVisible(el) && /comp|grant|subscription/i.test(el.textContent))
-                .map(el => ({{ tag: el.tagName, text: el.textContent.trim().slice(0, 80), classes: el.className.slice(0, 100) }}));
-            return {{ url: window.location.href, dialogs, compButtons }};
-        }})()
-    """)
-    logger.info("After row cell click — url=%s dialogs=%s compButtons=%s",
-                panel_debug['url'], panel_debug['dialogs'], panel_debug['compButtons'])
-
-    # Step 7: Find and click the comp/grant action in the management panel
-    # Try "Comp subscription", "Grant comp", or any comp-action button (not the tiny status badge)
-    comp_action = page.locator(
-        'button:has-text("Comp subscription"), '
-        'button:has-text("Grant comp"), '
-        'a:has-text("Comp subscription"), '
-        'a:has-text("Grant comp")'
-    ).first
-    await comp_action.click(timeout=10000)
+    # Step 6: Hover over the row to reveal hover-state action buttons
+    await subscriber_row.hover()
     await page.wait_for_timeout(1500)
 
-    # Debug: log inputs and buttons visible after clicking comp action (use computed style, not offsetParent)
-    comp_debug = await page.evaluate("""
+    hover_debug = await page.evaluate("""
         (() => {
             const isVisible = el => {
                 const s = getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+                return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
             };
-            const inputs = Array.from(document.querySelectorAll('input, select, textarea'))
-                .filter(isVisible)
-                .map(el => ({ tag: el.tagName, type: el.type, name: el.name, placeholder: el.placeholder, classes: el.className.slice(0, 80) }));
-            const buttons = Array.from(document.querySelectorAll('button'))
-                .filter(isVisible)
-                .map(el => ({ text: el.textContent.trim().slice(0, 60), type: el.type, classes: el.className.slice(0, 80) }));
-            return { inputs, buttons };
+            const row = document.querySelector('tr[class*="tr-"]');
+            const rowLinks = row ? Array.from(row.querySelectorAll('a')).map(a => ({ href: a.href, text: a.textContent.trim().slice(0, 60) })) : [];
+            const rowButtons = row ? Array.from(row.querySelectorAll('button')).map(b => ({ text: b.textContent.trim().slice(0, 60), ariaLabel: b.getAttribute('aria-label'), classes: b.className.slice(0, 100) })) : [];
+            return { rowLinks, rowButtons, url: window.location.href };
         })()
     """)
-    logger.info("After comp action — inputs: %s", comp_debug['inputs'])
-    logger.info("After comp action — buttons: %s", comp_debug['buttons'])
+    logger.info("After hover — url=%s rowLinks=%s rowButtons=%s",
+                hover_debug['url'], hover_debug['rowLinks'], hover_debug['rowButtons'])
+
+    # Step 7: Navigate into subscriber detail — prefer link in row, else click row
+    row_links = hover_debug.get('rowLinks', [])
+    if row_links:
+        await subscriber_row.locator('a').first.click()
+        logger.info("Clicked subscriber link: %s", row_links[0])
+    else:
+        await subscriber_row.click()
+    await page.wait_for_timeout(2000)
+
+    # Debug after navigation/click — look for dialog and any comp/grant buttons
+    post_click = await page.evaluate("""
+        (() => {
+            const isVisible = el => {
+                const s = getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
+            };
+            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
+                .map(el => ({ tag: el.tagName, classes: el.className.slice(0, 100), text: el.textContent.trim().slice(0, 300) }));
+            const compButtons = Array.from(document.querySelectorAll('button, a'))
+                .filter(el => isVisible(el) && /comp|grant/i.test(el.textContent + (el.getAttribute('aria-label') || '')))
+                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 100) }));
+            return { url: window.location.href, dialogs, compButtons };
+        })()
+    """)
+    logger.info("After row action — url=%s dialogs=%s compButtons=%s",
+                post_click['url'], post_click['dialogs'], post_click['compButtons'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

@@ -57,9 +57,11 @@ async def _run_executor(action_id: UUID, db: AsyncSession) -> None:
         context = await browser.new_context()
 
         # Inject session cookie — no login flow
+        # Cookie name varies by setup: custom-domain publications use connect.sid
+        cookie_name = os.getenv("SUBSTACK_SESSION_COOKIE_NAME", "connect.sid")
         await context.add_cookies([
             {
-                "name": "substack.sid",
+                "name": cookie_name,
                 "value": session_cookie,
                 "domain": domain,
                 "path": "/",

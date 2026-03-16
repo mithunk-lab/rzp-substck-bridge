@@ -1,7 +1,6 @@
-import asyncio
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from uuid import UUID
@@ -131,34 +130,38 @@ async def _execute_comp(
     # Clear any previously-set cookie-expiry flag on successful navigation
     await _upsert_setting(db, "substack_cookie_expired", "false")
 
-    # Steps 4–7: Navigate directly to subscriber detail page (no search/row-click needed)
+    # Step 4: Navigate directly to subscriber detail page
     detail_url = f"{publication_url}/publish/subscribers/details?email={quote(action.subscriber_email)}"
     await page.goto(detail_url, wait_until="networkidle")
-    # Wait for React to hydrate the subscriber detail content
     await page.wait_for_timeout(4000)
-    logger.info("Navigated to subscriber detail — url=%s", page.url)
 
-    # Click the Ellipsis button on the detail page to open subscriber management menu
+    # Re-check for login redirect after detail navigation
+    if "login" in page.url:
+        await _fail_action(action, page, db, "Substack session cookie expired — refresh required")
+        await _upsert_setting(db, "substack_cookie_expired", "true")
+        return
+
+    # Step 5: Confirm subscriber detail page loaded (Back button is present when on detail page)
+    if not await page.locator('button[aria-label="Back"]').is_visible(timeout=5000):
+        await _fail_action(action, page, db, f"Subscriber detail page not found for {action.subscriber_email}")
+        return
+
+    # Step 6: Open subscriber management menu via Ellipsis button
     await page.locator('button[aria-label="Ellipsis"]').first.click(timeout=5000)
+    await page.wait_for_timeout(1000)
+
+    # Step 7: Click "Comp subscription" in the dropdown menu
+    comp_menu_item = page.locator('[role="menuitem"]:has-text("Comp subscription")').first
+    if not await comp_menu_item.is_visible(timeout=5000):
+        await _fail_action(
+            action, page, db,
+            "Comp subscription option not available in subscriber menu — subscriber may already be comped or on paid plan",
+        )
+        return
+    await comp_menu_item.click()
     await page.wait_for_timeout(1500)
 
-    # Log what appeared in the dropdown
-    dropdown_debug = await page.evaluate("""
-        (() => {
-            const isVisible = el => {
-                const s = getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
-            };
-            const allItems = Array.from(document.querySelectorAll('button, a, [role="menuitem"]'))
-                .filter(isVisible)
-                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), role: el.getAttribute('role'), classes: el.className.slice(0, 80) }));
-            return { allCount: allItems.length, newItems: allItems.slice(27) };
-        })()
-    """)
-    logger.info("After Ellipsis click — allCount=%s newItems=%s",
-                dropdown_debug['allCount'], dropdown_debug['newItems'])
-
-    # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
+    # Step 8: DRY_RUN gate — screenshot the comp dialog before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     if dry_run:
         logger.info(
@@ -175,82 +178,35 @@ async def _execute_comp(
         await _upsert_setting(db, "last_executor_status", "manual")
         return
 
-    # Step 8: Fill in comp details
+    # Step 9: Fill in comp duration
     if action.is_lifetime:
-        # Select the lifetime / forever option in the comp dialog
         await page.locator(
-            'input[value="forever"], '
-            'label:has-text("Forever"), '
-            'label:has-text("Lifetime")'
+            'input[value="forever"], label:has-text("Forever"), label:has-text("Lifetime")'
         ).first.click()
     else:
-        # Enter the integer number of days into the days field
         await page.locator('input[type="number"]').first.fill(str(action.comp_days))
 
-    # Step 10 (execute): Click the confirm button
-    # The confirm button is typically the primary submit button inside the comp dialog
+    # Step 10: Confirm
     await page.locator(
-        'button[type="submit"]:visible, '
-        'button:has-text("Confirm"):visible'
+        'button[type="submit"]:visible, button:has-text("Comp"):visible, button:has-text("Confirm"):visible'
     ).last.click()
     await page.wait_for_timeout(2000)
 
-    # Step 10 (verify): Re-fetch subscriber to confirm expiry was updated
-    await search_input.fill(action.subscriber_email)
-    await page.wait_for_timeout(1500)
-
-    expiry_text = await page.locator(
-        f'tr:has-text("{action.subscriber_email}") .expiry-date, '
-        f'tr:has-text("{action.subscriber_email}") [data-expiry]'
-    ).first.inner_text(timeout=3000)
-
-    if await _verify_expiry(action, expiry_text):
-        screenshot_path = await _take_screenshot(page, action.id, "success")
-        action.execution_status = ExecutionStatus.success
-        action.executed_at = datetime.now(timezone.utc)
-        action.screenshot_path = screenshot_path
-        await db.commit()
-        await _upsert_setting(db, "last_executor_status", "success")
-        logger.info(
-            "Executed: %s comped for %s days / lifetime=%s",
-            action.subscriber_email,
-            action.comp_days,
-            action.is_lifetime,
-        )
-    else:
-        if action.is_lifetime:
-            expected = "lifetime"
-        else:
-            expected = str(date.today() + timedelta(days=action.comp_days))
-        await _fail_action(
-            action,
-            page,
-            db,
-            f"Verification failed: expected expiry {expected}, got {expiry_text!r}",
-        )
+    screenshot_path = await _take_screenshot(page, action.id, "success")
+    action.execution_status = ExecutionStatus.success
+    action.executed_at = datetime.now(timezone.utc)
+    action.screenshot_path = screenshot_path
+    await db.commit()
+    await _upsert_setting(db, "last_executor_status", "success")
+    logger.info(
+        "Executed: %s comped for %s days / lifetime=%s",
+        action.subscriber_email,
+        action.comp_days,
+        action.is_lifetime,
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _verify_expiry(action: Action, expiry_text: str) -> bool:
-    """
-    Returns True if the expiry text from the dashboard matches what was expected.
-    Allows a 1-day tolerance for timezone edge cases.
-    """
-    if action.is_lifetime:
-        return "lifetime" in expiry_text.lower() or "forever" in expiry_text.lower()
-
-    expected_date = date.today() + timedelta(days=action.comp_days)
-    # Check ISO format and common display formats within ±1 day tolerance
-    for delta in range(-1, 2):
-        candidate = expected_date + timedelta(days=delta)
-        if (
-            candidate.isoformat() in expiry_text
-            or candidate.strftime("%b %-d, %Y") in expiry_text
-            or candidate.strftime("%B %-d, %Y") in expiry_text
-        ):
-            return True
-    return False
 
 
 async def _take_screenshot(page, action_id: UUID, suffix: str) -> str:

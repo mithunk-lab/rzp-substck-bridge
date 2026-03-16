@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environment
+.env
+*.env
+
+# Virtual environments
+.venv
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbbs.db
+
+# Playwright
+playwright/.auth/
+playwright-report/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+backend/logs/*.log

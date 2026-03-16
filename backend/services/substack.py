@@ -154,25 +154,36 @@ async def _execute_comp(
 
     # Step 6: Open subscriber management panel
     await subscriber_row.click()
-    await page.wait_for_timeout(500)
+    await page.wait_for_timeout(1500)
+
+    # Debug: log buttons/links visible after clicking the row
+    panel_debug = await page.evaluate("""
+        Array.from(document.querySelectorAll('button, a[role="button"]'))
+            .filter(el => el.offsetParent !== null)
+            .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 60), classes: el.className.slice(0, 80) }))
+    """)
+    logger.info("Visible buttons after row click (%d): %s", len(panel_debug), panel_debug)
 
     # Step 7: Select "Comp subscription" option in the management panel
     await page.locator('button:has-text("Comp")').first.click()
-    await page.wait_for_timeout(500)
+    await page.wait_for_timeout(1500)
 
-    # Step 8: Fill in comp details
-    if action.is_lifetime:
-        # Select the lifetime / forever option in the comp dialog
-        await page.locator(
-            'input[value="forever"], '
-            'label:has-text("Forever"), '
-            'label:has-text("Lifetime")'
-        ).first.click()
-    else:
-        # Enter the integer number of days into the days field
-        await page.locator('input[type="number"]').first.fill(str(action.comp_days))
+    # Debug: log inputs and buttons visible after clicking Comp
+    comp_debug = await page.evaluate("""
+        (() => {
+            const inputs = Array.from(document.querySelectorAll('input, select, textarea'))
+                .filter(el => el.offsetParent !== null)
+                .map(el => ({ tag: el.tagName, type: el.type, name: el.name, placeholder: el.placeholder, classes: el.className.slice(0, 80) }));
+            const buttons = Array.from(document.querySelectorAll('button'))
+                .filter(el => el.offsetParent !== null)
+                .map(el => ({ text: el.textContent.trim().slice(0, 60), type: el.type, classes: el.className.slice(0, 80) }));
+            return { inputs, buttons };
+        })()
+    """)
+    logger.info("Comp dialog inputs: %s", comp_debug['inputs'])
+    logger.info("Comp dialog buttons: %s", comp_debug['buttons'])
 
-    # Step 9: DRY_RUN gate — stop here if dry run, do NOT click confirm
+    # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     if dry_run:
         logger.info(
@@ -188,6 +199,18 @@ async def _execute_comp(
         await db.commit()
         await _upsert_setting(db, "last_executor_status", "manual")
         return
+
+    # Step 8: Fill in comp details
+    if action.is_lifetime:
+        # Select the lifetime / forever option in the comp dialog
+        await page.locator(
+            'input[value="forever"], '
+            'label:has-text("Forever"), '
+            'label:has-text("Lifetime")'
+        ).first.click()
+    else:
+        # Enter the integer number of days into the days field
+        await page.locator('input[type="number"]').first.fill(str(action.comp_days))
 
     # Step 10 (execute): Click the confirm button
     # The confirm button is typically the primary submit button inside the comp dialog

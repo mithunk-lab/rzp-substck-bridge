@@ -135,16 +135,23 @@ async def _execute_comp(
     # The search input on the Substack subscribers page
     search_input = page.locator('input[placeholder*="Search"]').first
     await search_input.fill(action.subscriber_email)
-    await page.wait_for_timeout(1500)  # allow results to load
+    # Wait for search results to settle
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(1000)
+
+    # Debug screenshot — lets us inspect the page state if the next step fails
+    await _take_screenshot(page, action.id, "debug_after_search")
 
     # Step 5: Locate subscriber row in results
-    # Substack renders subscribers in a table; each row contains the email address
+    # Try table row first, then fall back to any cell/div containing the email
     subscriber_row = page.locator(
         f'tr:has-text("{action.subscriber_email}"), '
-        f'[data-email="{action.subscriber_email}"]'
+        f'[data-email="{action.subscriber_email}"], '
+        f'td:has-text("{action.subscriber_email}"), '
+        f'[data-testid="subscriber-row"]:has-text("{action.subscriber_email}")'
     ).first
 
-    if not await subscriber_row.is_visible(timeout=3000):
+    if not await subscriber_row.is_visible(timeout=5000):
         await _fail_action(
             action,
             page,

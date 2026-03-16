@@ -207,12 +207,13 @@ async def _execute_comp(
         await page.locator('input[type="date"]').first.fill(target_date.isoformat())
         await page.wait_for_timeout(300)
 
-    # Step 10: Confirm — button text is dynamic ("Extend until …" / "Comp until …")
+    # Step 10: Confirm — button text is dynamic across flows:
+    # "Comp for 30 days" / "Comp indefinitely" / "Comp until …" / "Extend until …"
     await page.locator(
-        'button:has-text("Extend until"), '
+        'button:has-text("Comp for"), '
+        'button:has-text("Comp indefinitely"), '
         'button:has-text("Comp until"), '
-        'button:has-text("Grant"), '
-        'button[type="submit"]'
+        'button:has-text("Extend until")'
     ).last.click(timeout=5000)
     await page.wait_for_timeout(2000)
 

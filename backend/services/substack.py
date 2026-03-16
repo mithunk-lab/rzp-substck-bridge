@@ -139,8 +139,10 @@ async def _execute_comp(
     await page.wait_for_load_state("networkidle")
     await page.wait_for_timeout(1000)
 
-    # Debug screenshot — lets us inspect the page state if the next step fails
-    await _take_screenshot(page, action.id, "debug_after_search")
+    # Debug: log URL and page body snippet so we can inspect structure in logs
+    logger.info("Page URL after search: %s", page.url)
+    body_html = await page.inner_html("body")
+    logger.info("Page body snippet (first 3000 chars): %s", body_html[:3000])
 
     # Step 5: Locate subscriber row in results
     # Try table row first, then fall back to any cell/div containing the email

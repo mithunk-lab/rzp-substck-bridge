@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from uuid import UUID
 
 from playwright.async_api import async_playwright
@@ -131,36 +131,14 @@ async def _execute_comp(
     # Clear any previously-set cookie-expiry flag on successful navigation
     await _upsert_setting(db, "substack_cookie_expired", "false")
 
-    # Step 4: Search for subscriber by email — navigate directly to the search URL
-    # so the server renders results, then wait for React hydration
-    await page.goto(
-        f"{publication_url}/publish/subscribers?s={action.subscriber_email}",
-        wait_until="networkidle",
-    )
-    # Give React time to hydrate the subscriber list into the DOM
-    await page.wait_for_timeout(3000)
-
-    # Step 5: Locate subscriber row — Substack renders results as <tr class="tr-jyGCha ...">
-    subscriber_row = page.locator(f'tr:has-text("{action.subscriber_email}")').first
-
-    if not await subscriber_row.is_visible(timeout=8000):
-        await _fail_action(
-            action,
-            page,
-            db,
-            "Subscriber email not found on Substack dashboard",
-        )
-        return
-
-    # Step 6: Click the subscriber's email link to navigate to their detail page
-    # The link has class decoration-hover-underline-ClDVRM and contains the email text
-    email_link = subscriber_row.locator('a[class*="decoration-hover-underline"]').first
-    await email_link.click(timeout=5000)
-    await page.wait_for_load_state("networkidle")
-    await page.wait_for_timeout(2000)
+    # Steps 4–7: Navigate directly to subscriber detail page (no search/row-click needed)
+    detail_url = f"{publication_url}/publish/subscribers/details?email={quote(action.subscriber_email)}"
+    await page.goto(detail_url, wait_until="networkidle")
+    # Wait for React to hydrate the subscriber detail content
+    await page.wait_for_timeout(4000)
     logger.info("Navigated to subscriber detail — url=%s", page.url)
 
-    # Step 7: Find comp action on detail page
+    # Debug: log all visible buttons/links on detail page
     detail_debug = await page.evaluate("""
         (() => {
             const isVisible = el => {
@@ -171,11 +149,11 @@ async def _execute_comp(
                 .filter(isVisible)
                 .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 80) }));
             const compItems = allButtons.filter(b => /comp|grant|free|extend/i.test(b.text + (b.ariaLabel || '')));
-            return { url: window.location.href, compItems, allCount: allButtons.length, all: allButtons };
+            return { url: window.location.href, compItems, allCount: allButtons.length, contentButtons: allButtons.slice(16) };
         })()
     """)
-    logger.info("Detail page — url=%s compItems=%s all=%s",
-                detail_debug['url'], detail_debug['compItems'], detail_debug['all'])
+    logger.info("Detail page — url=%s compItems=%s contentButtons=%s",
+                detail_debug['url'], detail_debug['compItems'], detail_debug['contentButtons'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

@@ -3,9 +3,10 @@ rootDirectory = "backend"
 
 [services.backend.build]
 builder = "NIXPACKS"
+buildCommand = "pip install -r requirements.txt && playwright install chromium --with-deps"
 
 [services.backend.deploy]
-startCommand = "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+startCommand = "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
@@ -16,7 +17,7 @@ rootDirectory = "frontend"
 
 [services.frontend.build]
 builder = "NIXPACKS"
-buildCommand = "npm run build"
+buildCommand = "npm install && npm run build"
 
 [services.frontend.deploy]
-startCommand = "npx serve dist"
+startCommand = "npx serve dist --port $PORT"

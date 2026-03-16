@@ -131,42 +131,51 @@ async def _execute_comp(
     # Clear any previously-set cookie-expiry flag on successful navigation
     await _upsert_setting(db, "substack_cookie_expired", "false")
 
-    # Step 4: Search for subscriber by email
-    # The search input on the Substack subscribers page
-    search_input = page.locator('input[placeholder*="Search"]').first
-    await search_input.fill(action.subscriber_email)
-    # Wait for search results to settle
-    await page.wait_for_load_state("networkidle")
-    await page.wait_for_timeout(1000)
+    # Step 4: Search for subscriber by email — navigate directly to the search URL
+    # so the server renders results, then wait for React hydration
+    await page.goto(
+        f"{publication_url}/publish/subscribers?s={action.subscriber_email}",
+        wait_until="networkidle",
+    )
+    # Give React time to hydrate the subscriber list into the DOM
+    await page.wait_for_timeout(3000)
 
-    # Debug: find all leaf elements containing the email to identify the correct selector
+    # Debug: log all table rows and list items to identify the correct selector
     logger.info("Page URL after search: %s", page.url)
-    elements = await page.evaluate(f"""
-        Array.from(document.querySelectorAll('*')).filter(el =>
-            el.children.length === 0 &&
-            el.textContent.includes('{action.subscriber_email}')
-        ).map(el => ({{
-            tag: el.tagName,
-            classes: el.className,
-            text: el.textContent.trim().slice(0, 80),
-            parentTag: el.parentElement ? el.parentElement.tagName : null,
-            parentClasses: el.parentElement ? el.parentElement.className : null,
-            grandparentTag: el.parentElement && el.parentElement.parentElement ? el.parentElement.parentElement.tagName : null,
-            grandparentClasses: el.parentElement && el.parentElement.parentElement ? el.parentElement.parentElement.className : null,
-        }}))
+    structure = await page.evaluate(f"""
+        (() => {{
+            const email = '{action.subscriber_email}';
+            // All tr/li/div rows that might be subscriber rows
+            const rows = Array.from(document.querySelectorAll('tr, li, [class*="row"], [class*="subscriber"]'));
+            const matching = rows.filter(el => el.textContent.includes(email));
+            const sample = rows.slice(0, 5);  // first 5 rows regardless of match
+            return {{
+                matchingRows: matching.map(el => ({{
+                    tag: el.tagName,
+                    classes: el.className,
+                    text: el.textContent.trim().slice(0, 120),
+                    childTags: Array.from(el.children).map(c => c.tagName + '.' + c.className).slice(0, 5),
+                }})),
+                sampleRows: sample.map(el => ({{
+                    tag: el.tagName,
+                    classes: el.className,
+                    text: el.textContent.trim().slice(0, 80),
+                }})),
+                emailInDom: document.body.innerText.includes(email),
+            }};
+        }})()
     """)
-    logger.info("Elements containing email (%d found): %s", len(elements), elements)
+    logger.info("DOM structure debug: %s", structure)
 
     # Step 5: Locate subscriber row in results
-    # Try table row first, then fall back to any cell/div containing the email
     subscriber_row = page.locator(
         f'tr:has-text("{action.subscriber_email}"), '
-        f'[data-email="{action.subscriber_email}"], '
-        f'td:has-text("{action.subscriber_email}"), '
-        f'[data-testid="subscriber-row"]:has-text("{action.subscriber_email}")'
+        f'li:has-text("{action.subscriber_email}"), '
+        f'[class*="row"]:has-text("{action.subscriber_email}"), '
+        f'[class*="subscriber"]:has-text("{action.subscriber_email}")'
     ).first
 
-    if not await subscriber_row.is_visible(timeout=5000):
+    if not await subscriber_row.is_visible(timeout=8000):
         await _fail_action(
             action,
             page,

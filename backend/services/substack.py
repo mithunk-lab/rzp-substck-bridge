@@ -201,11 +201,11 @@ async def _execute_comp(
                 .filter(isVisible)
                 .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 80) }));
             const compButtons = allButtons.filter(b => /comp|grant/i.test(b.text + (b.ariaLabel || '')));
-            return { url: window.location.href, compButtons, allButtonCount: allButtons.length, sample: allButtons.slice(0, 10) };
+            return { url: window.location.href, compButtons, allButtonCount: allButtons.length, panelButtons: allButtons.slice(10) };
         })()
     """)
-    logger.info("After navigation — url=%s compButtons=%s allButtonCount=%s sample=%s",
-                post_nav['url'], post_nav['compButtons'], post_nav['allButtonCount'], post_nav['sample'])
+    logger.info("After navigation — url=%s compButtons=%s allButtonCount=%s panelButtons=%s",
+                post_nav['url'], post_nav['compButtons'], post_nav['allButtonCount'], post_nav['panelButtons'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

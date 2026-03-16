@@ -1,0 +1,51 @@
+import logging
+from datetime import datetime, timedelta, timezone
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import func, select
+
+logger = logging.getLogger(__name__)
+
+scheduler = AsyncIOScheduler()
+
+
+async def check_sync_overdue() -> None:
+    """
+    Check whether the subscriber sync is overdue (> 24 hours since last sync).
+    Logs a warning if so. Does not trigger any auto-fetch — the dashboard
+    surfaces the overdue state via GET /admin/subscribers/stats.
+    """
+    from database import AsyncSessionLocal
+    from models import Subscriber
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(func.max(Subscriber.last_synced_at)))
+        last_synced_at = result.scalar_one()
+
+    if last_synced_at is None:
+        logger.warning("Subscriber sync overdue: no sync has ever been performed")
+        return
+
+    age = datetime.now(timezone.utc) - last_synced_at
+    if age > timedelta(hours=24):
+        hours = int(age.total_seconds() // 3600)
+        logger.warning(
+            "Subscriber sync overdue: last sync was %dh ago (threshold: 24h)", hours
+        )
+
+
+def start_scheduler() -> None:
+    scheduler.add_job(
+        check_sync_overdue,
+        trigger="interval",
+        hours=24,
+        id="check_sync_overdue",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("APScheduler started — check_sync_overdue runs every 24h")
+
+
+def stop_scheduler() -> None:
+    scheduler.shutdown(wait=False)
+    logger.info("APScheduler stopped")

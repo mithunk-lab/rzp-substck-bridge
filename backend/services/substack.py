@@ -152,28 +152,30 @@ async def _execute_comp(
         )
         return
 
-    # Step 6: Hover to ensure row controls are visible, then click the Ellipsis ("...") menu
-    await subscriber_row.hover()
-    await page.wait_for_timeout(500)
-    await subscriber_row.locator('button[aria-label="Ellipsis"]').first.click(timeout=5000)
-    await page.wait_for_timeout(1500)
+    # Step 6: Click the subscriber's email link to navigate to their detail page
+    # The link has class decoration-hover-underline-ClDVRM and contains the email text
+    email_link = subscriber_row.locator('a[class*="decoration-hover-underline"]').first
+    await email_link.click(timeout=5000)
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(2000)
+    logger.info("Navigated to subscriber detail — url=%s", page.url)
 
-    # Step 7: Find and click the comp action in the dropdown
-    dropdown_debug = await page.evaluate("""
+    # Step 7: Find comp action on detail page
+    detail_debug = await page.evaluate("""
         (() => {
             const isVisible = el => {
                 const s = getComputedStyle(el);
                 return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
             };
-            const items = Array.from(document.querySelectorAll('button, a, [role="menuitem"], li'))
+            const allButtons = Array.from(document.querySelectorAll('button, a'))
                 .filter(isVisible)
-                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), role: el.getAttribute('role'), classes: el.className.slice(0, 80) }));
-            const compItems = items.filter(i => /comp|grant|free|extend/i.test(i.text + (i.ariaLabel || '')));
-            return { compItems, allItemCount: items.length, newItems: items.slice(22) };
+                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 80) }));
+            const compItems = allButtons.filter(b => /comp|grant|free|extend/i.test(b.text + (b.ariaLabel || '')));
+            return { url: window.location.href, compItems, allCount: allButtons.length, all: allButtons };
         })()
     """)
-    logger.info("Ellipsis dropdown — compItems=%s allItemCount=%s newItems=%s",
-                dropdown_debug['compItems'], dropdown_debug['allItemCount'], dropdown_debug['newItems'])
+    logger.info("Detail page — url=%s compItems=%s all=%s",
+                detail_debug['url'], detail_debug['compItems'], detail_debug['all'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

@@ -152,36 +152,58 @@ async def _execute_comp(
         )
         return
 
-    # Step 6: Open subscriber management panel
-    await subscriber_row.click()
-    await page.wait_for_timeout(1500)
+    # Step 6: Open subscriber management panel — click the first (email) cell, not the whole row
+    email_cell = subscriber_row.locator('td').first
+    await email_cell.click()
+    await page.wait_for_timeout(2000)
 
-    # Debug: log buttons/links visible after clicking the row
-    panel_debug = await page.evaluate("""
-        Array.from(document.querySelectorAll('button, a[role="button"]'))
-            .filter(el => el.offsetParent !== null)
-            .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 60), classes: el.className.slice(0, 80) }))
+    # Debug: URL change + any dialog/panel + all visible text containing "comp"
+    panel_debug = await page.evaluate(f"""
+        (() => {{
+            const isVisible = el => {{
+                const s = getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            }};
+            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], [class*="modal"], [class*="drawer"], [class*="panel"], [class*="flyout"], [class*="sheet"]'))
+                .map(el => ({{ tag: el.tagName, classes: el.className.slice(0, 100), text: el.textContent.trim().slice(0, 200) }}));
+            const compButtons = Array.from(document.querySelectorAll('button, a'))
+                .filter(el => isVisible(el) && /comp|grant|subscription/i.test(el.textContent))
+                .map(el => ({{ tag: el.tagName, text: el.textContent.trim().slice(0, 80), classes: el.className.slice(0, 100) }}));
+            return {{ url: window.location.href, dialogs, compButtons }};
+        }})()
     """)
-    logger.info("Visible buttons after row click (%d): %s", len(panel_debug), panel_debug)
+    logger.info("After row cell click — url=%s dialogs=%s compButtons=%s",
+                panel_debug['url'], panel_debug['dialogs'], panel_debug['compButtons'])
 
-    # Step 7: Select "Comp subscription" option in the management panel
-    await page.locator('button:has-text("Comp")').first.click()
+    # Step 7: Find and click the comp/grant action in the management panel
+    # Try "Comp subscription", "Grant comp", or any comp-action button (not the tiny status badge)
+    comp_action = page.locator(
+        'button:has-text("Comp subscription"), '
+        'button:has-text("Grant comp"), '
+        'a:has-text("Comp subscription"), '
+        'a:has-text("Grant comp")'
+    ).first
+    await comp_action.click(timeout=10000)
     await page.wait_for_timeout(1500)
 
-    # Debug: log inputs and buttons visible after clicking Comp
+    # Debug: log inputs and buttons visible after clicking comp action (use computed style, not offsetParent)
     comp_debug = await page.evaluate("""
         (() => {
+            const isVisible = el => {
+                const s = getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            };
             const inputs = Array.from(document.querySelectorAll('input, select, textarea'))
-                .filter(el => el.offsetParent !== null)
+                .filter(isVisible)
                 .map(el => ({ tag: el.tagName, type: el.type, name: el.name, placeholder: el.placeholder, classes: el.className.slice(0, 80) }));
             const buttons = Array.from(document.querySelectorAll('button'))
-                .filter(el => el.offsetParent !== null)
+                .filter(isVisible)
                 .map(el => ({ text: el.textContent.trim().slice(0, 60), type: el.type, classes: el.className.slice(0, 80) }));
             return { inputs, buttons };
         })()
     """)
-    logger.info("Comp dialog inputs: %s", comp_debug['inputs'])
-    logger.info("Comp dialog buttons: %s", comp_debug['buttons'])
+    logger.info("After comp action — inputs: %s", comp_debug['inputs'])
+    logger.info("After comp action — buttons: %s", comp_debug['buttons'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

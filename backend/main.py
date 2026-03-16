@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,12 @@ async def lifespan(app: FastAPI):
     logger.info("Bridge starting up")
     # Ensure screenshots directory exists before mounting static files
     Path("screenshots").mkdir(exist_ok=True)
+    # Run database migrations before serving traffic
+    result = subprocess.run(["alembic", "upgrade", "head"], capture_output=True, text=True)
+    logger.info("Alembic stdout: %s", result.stdout)
+    if result.returncode != 0:
+        logger.error("Migration failed: %s", result.stderr)
+        raise RuntimeError("Database migration failed — see logs above")
     await init_db()
     # Scheduler only runs in production — dev/test environments skip it
     if os.getenv("ENVIRONMENT", "production") == "production":

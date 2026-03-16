@@ -138,22 +138,25 @@ async def _execute_comp(
     await page.wait_for_timeout(4000)
     logger.info("Navigated to subscriber detail — url=%s", page.url)
 
-    # Debug: log all visible buttons/links on detail page
-    detail_debug = await page.evaluate("""
+    # Click the Ellipsis button on the detail page to open subscriber management menu
+    await page.locator('button[aria-label="Ellipsis"]').first.click(timeout=5000)
+    await page.wait_for_timeout(1500)
+
+    # Log what appeared in the dropdown
+    dropdown_debug = await page.evaluate("""
         (() => {
             const isVisible = el => {
                 const s = getComputedStyle(el);
                 return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
             };
-            const allButtons = Array.from(document.querySelectorAll('button, a'))
+            const allItems = Array.from(document.querySelectorAll('button, a, [role="menuitem"]'))
                 .filter(isVisible)
-                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), classes: el.className.slice(0, 80) }));
-            const compItems = allButtons.filter(b => /comp|grant|free|extend/i.test(b.text + (b.ariaLabel || '')));
-            return { url: window.location.href, compItems, allCount: allButtons.length, contentButtons: allButtons.slice(16) };
+                .map(el => ({ tag: el.tagName, text: el.textContent.trim().slice(0, 80), ariaLabel: el.getAttribute('aria-label'), role: el.getAttribute('role'), classes: el.className.slice(0, 80) }));
+            return { allCount: allItems.length, newItems: allItems.slice(27) };
         })()
     """)
-    logger.info("Detail page — url=%s compItems=%s contentButtons=%s",
-                detail_debug['url'], detail_debug['compItems'], detail_debug['contentButtons'])
+    logger.info("After Ellipsis click — allCount=%s newItems=%s",
+                dropdown_debug['allCount'], dropdown_debug['newItems'])
 
     # Step 9 (early): DRY_RUN gate — screenshot the comp dialog state before filling
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"

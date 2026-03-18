@@ -213,7 +213,9 @@ async def _execute_comp(
         'button:has-text("Comp for"), '
         'button:has-text("Comp indefinitely"), '
         'button:has-text("Comp until"), '
-        'button:has-text("Extend until")'
+        'button:has-text("Extend until"), '
+        'button:has-text("Extend for"), '
+        'button:has-text("Extend indefinitely")'
     ).last.click(timeout=5000)
     await page.wait_for_timeout(2000)
 

@@ -147,7 +147,7 @@ async def _execute_comp(
         return
 
     # Step 6: Open subscriber management menu via Ellipsis button
-    await page.locator('button[aria-label="Ellipsis"]').first.click(timeout=5000)
+    await page.locator('button[aria-label="Ellipsis"]').first.click(timeout=10000)
     await page.wait_for_timeout(1000)
 
     # Step 7: Click the appropriate option in the dropdown menu

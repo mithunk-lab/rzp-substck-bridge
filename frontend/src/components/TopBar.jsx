@@ -27,7 +27,7 @@ export default function TopBar() {
     <div className="border-b border-gray-800 px-8 h-12 flex items-center gap-8">
       {/* Wordmark */}
       <span className="font-condensed text-white font-semibold tracking-[0.35em] text-base shrink-0">
-        WIRE BRIDGE
+        BRIDGE
       </span>
 
       {/* Navigation */}

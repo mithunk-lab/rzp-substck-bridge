@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -272,8 +272,8 @@ async def action_log(
     page_size: int = Query(50, ge=1, le=200),
     status: Optional[ExecutionStatus] = None,
     email: Optional[str] = None,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None,
+    date_from: Optional[date_type] = None,
+    date_to: Optional[date_type] = None,
     db: AsyncSession = Depends(get_db),
     api_key: str = Depends(require_api_key),
 ):
@@ -283,9 +283,11 @@ async def action_log(
         if email:
             q = q.where(Action.subscriber_email.ilike(f"%{email}%"))
         if date_from:
-            q = q.where(Action.created_at >= date_from)
+            dt_from = datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
+            q = q.where(Action.created_at >= dt_from)
         if date_to:
-            q = q.where(Action.created_at <= date_to)
+            dt_to = datetime(date_to.year, date_to.month, date_to.day, tzinfo=timezone.utc) + timedelta(days=1)
+            q = q.where(Action.created_at < dt_to)
         return q
 
     count_q = _apply_filters(select(func.count(Action.id)))
@@ -325,8 +327,8 @@ async def action_log(
 async def export_log(
     status: Optional[ExecutionStatus] = None,
     email: Optional[str] = None,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None,
+    date_from: Optional[date_type] = None,
+    date_to: Optional[date_type] = None,
     db: AsyncSession = Depends(get_db),
     api_key: str = Depends(require_api_key),
 ):
@@ -337,9 +339,9 @@ async def export_log(
     if email:
         query = query.where(Action.subscriber_email.ilike(f"%{email}%"))
     if date_from:
-        query = query.where(Action.created_at >= date_from)
+        query = query.where(Action.created_at >= datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc))
     if date_to:
-        query = query.where(Action.created_at <= date_to)
+        query = query.where(Action.created_at < datetime(date_to.year, date_to.month, date_to.day, tzinfo=timezone.utc) + timedelta(days=1))
 
     query = query.order_by(Action.created_at.desc())
     result = await db.execute(query)

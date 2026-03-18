@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../lib/api'
 
@@ -81,9 +81,8 @@ export default function Failed() {
         </thead>
         <tbody>
           {actions.map((a) => (
-            <>
+            <Fragment key={a.id}>
               <tr
-                key={a.id}
                 onClick={() => setExpandedRow(expandedRow === a.id ? null : a.id)}
                 className="border-b border-gray-900 hover:bg-gray-900/20 cursor-pointer"
               >
@@ -114,7 +113,7 @@ export default function Failed() {
 
               {/* Expanded detail */}
               {expandedRow === a.id && (
-                <tr key={`${a.id}-exp`} className="border-b border-gray-800 bg-[#111]">
+                <tr className="border-b border-gray-800 bg-[#111]">
                   <td colSpan={5} className="px-6 py-5">
                     <div className="space-y-3">
                       {/* Failure reason prominent */}
@@ -150,7 +149,7 @@ export default function Failed() {
                             FAILURE SCREENSHOT
                           </p>
                           <img
-                            src={`/screenshots/${a.screenshot_path.split('/').pop()}`}
+                            src={`${import.meta.env.VITE_API_URL || ''}/screenshots/${a.screenshot_path.split('/').pop()}`}
                             alt="failure screenshot"
                             className="max-w-sm border border-gray-800 opacity-80 hover:opacity-100"
                           />
@@ -167,7 +166,7 @@ export default function Failed() {
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>

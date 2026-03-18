@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '../lib/api'
 
@@ -178,9 +178,8 @@ export default function Log() {
                 </tr>
               )}
               {items.map((item) => (
-                <>
+                <Fragment key={item.id}>
                   <tr
-                    key={item.id}
                     onClick={() =>
                       setExpandedRow(expandedRow === item.id ? null : item.id)
                     }
@@ -204,7 +203,7 @@ export default function Log() {
 
                   {/* Expanded detail row */}
                   {expandedRow === item.id && (
-                    <tr key={`${item.id}-exp`} className="border-b border-gray-800 bg-[#111]">
+                    <tr className="border-b border-gray-800 bg-[#111]">
                       <td colSpan={6} className="px-6 py-4">
                         <div className="grid grid-cols-2 gap-6 font-mono text-xs">
                           <div className="space-y-2">
@@ -228,7 +227,7 @@ export default function Log() {
                               SCREENSHOT
                             </p>
                             <img
-                              src={`/screenshots/${item.screenshot_path.split('/').pop()}`}
+                              src={`${import.meta.env.VITE_API_URL || ''}/screenshots/${item.screenshot_path.split('/').pop()}`}
                               alt="execution screenshot"
                               className="max-w-xs border border-gray-700 opacity-80 hover:opacity-100"
                             />
@@ -237,7 +236,7 @@ export default function Log() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

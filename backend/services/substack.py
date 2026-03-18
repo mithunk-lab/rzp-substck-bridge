@@ -208,7 +208,8 @@ async def _execute_comp(
         await page.wait_for_timeout(300)
 
     # Step 10: Confirm — button text is dynamic across flows:
-    # "Comp for 30 days" / "Comp indefinitely" / "Comp until …" / "Extend until …"
+    # "Comp for X days" / "Comp indefinitely" / "Comp until …"
+    # "Extend for X" / "Extend indefinitely" / "Extend until …"
     await page.locator(
         'button:has-text("Comp for"), '
         'button:has-text("Comp indefinitely"), '

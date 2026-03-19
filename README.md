@@ -169,8 +169,6 @@ If **FAILED** shows a number greater than zero, open the Failed view. Read the f
 
 ## 8. Data and Privacy
 
-> ⚠️ **NOT YET IMPLEMENTED** — The automated data hygiene jobs described in this section (phone number auto-nullification and scheduled deletion reconciliation) have been designed and documented but not yet built. The data storage behaviour described below is accurate. The automatic deletion schedule is planned for a future release and will be added to this codebase without any changes to the existing architecture.
-
 **What data Bridge stores:**
 
 Bridge stores three categories of data in its PostgreSQL database:
@@ -179,9 +177,9 @@ Bridge stores three categories of data in its PostgreSQL database:
 - **Subscriber cache** — A local copy of your Substack subscriber list including email, name, subscription status, and expiry date. This is used for matching and is updated each time you upload a CSV. It is not the source of truth — Substack is.
 - **Action records** — A log of every comp grant attempted, including the outcome, comp duration granted, and a screenshot of the Substack dashboard at the time of execution. This is the audit trail for subscription fulfillment.
 
-**Phone number retention (planned):**
+**Phone number retention:**
 
-Phone numbers are collected from Razorpay payment data solely to assist with identity resolution in cases where name and email matching fails. Once a payment reaches `completed` or `auto_resolved` status and is more than 30 days old, the phone number field is intended to be automatically set to null. This fulfils the data minimisation principle under the Digital Personal Data Protection Act 2023 (DPDPA). Until this job is implemented, phone numbers will persist in the database indefinitely.
+Phone numbers are collected from Razorpay payment data solely to assist with identity resolution in cases where name and email matching fails. A scheduled job runs daily and automatically sets the phone field to null on all payments that have reached `completed` or `auto_resolved` status and are more than 30 days old. This fulfils the data minimisation principle under the Digital Personal Data Protection Act 2023 (DPDPA). The job runs as part of the APScheduler process on the backend service and requires no manual intervention.
 
 **Subscriber cache:**
 
@@ -189,7 +187,7 @@ The subscriber cache reflects your Substack subscriber list at the time of the l
 
 **DPDPA 2023:**
 
-Bridge is designed with DPDPA compliance in mind. Payment data is collected solely for the purpose of subscription fulfillment, access is restricted to authorised operators via API key authentication, and the planned phone number nullification schedule directly addresses the Act's data minimisation requirement.
+Bridge is designed with DPDPA compliance in mind. Payment data is collected solely for the purpose of subscription fulfillment, access is restricted to authorised operators via API key authentication, and the phone number nullification schedule directly addresses the Act's data minimisation requirement.
 
 ---
 

@@ -11,5 +11,5 @@ async def require_api_key(
 ) -> str:
     api_key = os.getenv("DASHBOARD_API_KEY", "")
     if not credentials or not api_key or credentials.credentials != api_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
     return credentials.credentials

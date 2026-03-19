@@ -16,11 +16,10 @@ def _build_email(payment) -> tuple[str, str]:
     body = (
         f"Hi {payment.name},\n\n"
         f"We received your payment of INR {payment.amount_inr}. "
-        f"To activate your subscription, please reply to this email with "
-        f"the email address you use on The Wire's Substack newsletter.\n\n"
-        f"If you used this email address ({payment.email}) for your Substack "
-        f"subscription, simply reply confirming that.\n\n"
-        f"The Wire team"
+        f"To activate your subscription, please reply with the email address "
+        f"you use on The India Cable's Substack newsletter.\n\n"
+        f"If you used this address ({payment.email}), simply reply confirming that.\n\n"
+        f"The India Cable team"
     )
     return subject, body
 
@@ -28,14 +27,24 @@ def _build_email(payment) -> tuple[str, str]:
 async def send_clarification_email(payment) -> bool:
     """
     Send a clarification email to the payer via SMTP.
+    Returns True on success, False on any failure or when SMTP is not configured.
     Runs the blocking SMTP call in a thread-pool executor so the event loop
-    is never blocked. Returns True on success, False on any SMTP failure.
+    is never blocked.
     """
+    host = os.getenv("SMTP_HOST", "")
+    from_email = os.getenv("CLARIFICATION_EMAIL_FROM", "")
+
+    if not host or not from_email:
+        logger.warning(
+            "SMTP not configured (SMTP_HOST or CLARIFICATION_EMAIL_FROM is unset) — "
+            "skipping clarification email for payment %s",
+            payment.id,
+        )
+        return False
+
     subject, body = _build_email(payment)
 
-    from_email = os.getenv("CLARIFICATION_EMAIL_FROM", "")
     to_email = payment.email
-    host = os.getenv("SMTP_HOST", "")
     port = int(os.getenv("SMTP_PORT", "587"))
     user = os.getenv("SMTP_USER", "")
     password = os.getenv("SMTP_PASSWORD", "")

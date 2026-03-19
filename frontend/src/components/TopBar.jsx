@@ -18,7 +18,7 @@ export default function TopBar() {
     refetchInterval: 30_000,
   })
 
-  const pending = summary?.pending_review ?? 0
+  const pending = (summary?.pending_review ?? 0) + (summary?.unknown ?? 0)
   const failed = summary?.failed_actions ?? 0
   const syncOverdue = summary?.sync_overdue ?? false
   const cookieExpired = summary?.cookie_expired ?? false

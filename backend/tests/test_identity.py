@@ -8,7 +8,7 @@ a specific side-effect chain.
 """
 
 import os
-from datetime import datetime, timezone
+import smtplib
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -25,7 +25,7 @@ os.environ.setdefault("DASHBOARD_API_KEY", "test_api_key")
 from main import app
 from database import get_db
 from models import Payment, PaymentStatus, Subscriber
-from services.email import _build_email
+from services.email import _build_email, send_clarification_email
 from services.identity import (
     _run_resolution,
     _tier1_exact_email,
@@ -83,7 +83,7 @@ def make_db(*side_effects) -> AsyncMock:
     return db
 
 
-# ── Test 1: Tier 1 exact match ────────────────────────────────────────────────
+# ── Tier 1 tests ──────────────────────────────────────────────────────────────
 
 async def test_tier1_exact_match():
     """Matching subscriber sets status=auto_resolved and fires the subscription calculator."""
@@ -99,8 +99,6 @@ async def test_tier1_exact_match():
     db.commit.assert_awaited_once()
     mock_task.assert_called_once()
 
-
-# ── Test 2: Tier 1 case and whitespace normalisation ─────────────────────────
 
 async def test_tier1_case_and_whitespace():
     """
@@ -118,8 +116,6 @@ async def test_tier1_case_and_whitespace():
     assert payment.status == PaymentStatus.auto_resolved
 
 
-# ── Test 3: Tier 1 excludes deleted subscribers ───────────────────────────────
-
 async def test_tier1_excludes_deleted():
     """
     When the only subscriber matching the email is deleted, the DB query
@@ -136,7 +132,21 @@ async def test_tier1_excludes_deleted():
     db.commit.assert_not_awaited()
 
 
-# ── Test 4: Tier 2 fires only when Tier 1 fails ───────────────────────────────
+async def test_tier1_empty_email_returns_false():
+    """
+    Empty payment email short-circuits without querying the DB.
+    """
+    payment = make_payment(email="")
+    db = make_db()
+
+    result = await _tier1_exact_email(payment, db)
+
+    assert result is False
+    db.execute.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+# ── Tier 2 tests ──────────────────────────────────────────────────────────────
 
 async def test_tier2_fires_only_when_tier1_fails():
     """
@@ -160,12 +170,10 @@ async def test_tier2_fires_only_when_tier1_fails():
     assert "Priya Sharma" in payment_obj.resolution_notes
 
 
-# ── Test 5: Tier 2 selects highest scoring match ──────────────────────────────
-
 async def test_tier2_selects_highest_scoring_match():
     """
     When multiple subscribers score above the threshold, the one with the
-    highest score is recorded in resolution_notes.
+    highest score is recorded in resolution_notes and suggested_match fields.
     """
     payment = make_payment(name="John Smith", email="noone@example.com")
     high_match = make_subscriber(name="John Smith")    # score = 100
@@ -181,7 +189,57 @@ async def test_tier2_selects_highest_scoring_match():
     assert "Jane Doe" not in payment.resolution_notes
 
 
-# ── Test 6: Tier 2 falls through when no score meets threshold ────────────────
+async def test_tier2_sets_suggested_match_fields():
+    """
+    _tier2_fuzzy_name records suggested_match_email and suggested_match_score
+    on the payment for use by the dashboard Inbox view.
+    """
+    payment = make_payment(name="Priya Sharma", email="noone@example.com")
+    subscriber = make_subscriber(name="Priya Sharma", email="priya@substack.com")
+
+    db = make_db(_scalars_list([subscriber]))
+
+    result = await _tier2_fuzzy_name(payment, db)
+
+    assert result is True
+    assert payment.suggested_match_email == "priya@substack.com"
+    assert payment.suggested_match_score == 100
+
+
+async def test_tier2_takes_highest_when_multiple_above_threshold():
+    """
+    When two subscribers both score above threshold, the one with the strictly
+    higher score wins, regardless of ordering in the list.
+    """
+    payment = make_payment(name="John Smith", email="noone@example.com")
+    # "John Smith" exactly → score 100
+    exact = make_subscriber(name="John Smith", email="exact@example.com")
+    # "John A Smith" → score ~88-91 (above threshold but below 100)
+    close = make_subscriber(name="John A Smith", email="close@example.com")
+
+    # exact comes second — highest score should still win
+    db = make_db(_scalars_list([close, exact]))
+
+    result = await _tier2_fuzzy_name(payment, db)
+
+    assert result is True
+    assert payment.suggested_match_email == "exact@example.com"
+    assert payment.suggested_match_score == 100
+
+
+async def test_tier2_empty_subscribers_returns_false():
+    """
+    When the subscribers table is empty, Tier 2 returns False immediately
+    without committing.
+    """
+    payment = make_payment(name="Someone Real", email="noone@example.com")
+    db = make_db(_scalars_list([]))
+
+    result = await _tier2_fuzzy_name(payment, db)
+
+    assert result is False
+    db.commit.assert_not_awaited()
+
 
 async def test_tier2_falls_through_below_threshold():
     """
@@ -207,15 +265,29 @@ async def test_tier2_falls_through_below_threshold():
     assert payment_obj.status == PaymentStatus.unknown
 
 
-# ── Test 7: Tier 3 fires when both previous tiers fail ────────────────────────
+async def test_tier2_no_match_when_payment_name_empty():
+    """
+    Empty payment name short-circuits Tier 2 without querying the DB.
+    """
+    payment = make_payment(name="", email="noone@example.com")
+    db = make_db()
+
+    result = await _tier2_fuzzy_name(payment, db)
+
+    assert result is False
+    db.execute.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+# ── Tier 3 tests ──────────────────────────────────────────────────────────────
 
 async def test_tier3_fires_when_both_tiers_fail():
     """
     _tier3_no_match sets status=unknown, inserts a ClarificationEmail row,
-    and commits.
+    and commits — when the email is successfully sent.
     """
     payment = make_payment(email="ghost@example.com", name="Xyz Qrst")
-    db = make_db()  # no execute calls needed — _tier3 only uses add/commit
+    db = make_db()
 
     with patch(
         "services.identity.send_clarification_email",
@@ -225,11 +297,31 @@ async def test_tier3_fires_when_both_tiers_fail():
         await _tier3_no_match(payment, db)
 
     assert payment.status == PaymentStatus.unknown
-    db.add.assert_called_once()   # ClarificationEmail row
+    db.add.assert_called_once()   # ClarificationEmail row written
     db.commit.assert_awaited_once()
 
 
-# ── Test 8: Clarification email content ──────────────────────────────────────
+async def test_tier3_no_clarification_record_when_smtp_fails():
+    """
+    When send_clarification_email returns False (SMTP failure or not configured),
+    no ClarificationEmail record is written. Status is still set to unknown.
+    """
+    payment = make_payment(email="ghost@example.com", name="Xyz Qrst")
+    db = make_db()
+
+    with patch(
+        "services.identity.send_clarification_email",
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
+        await _tier3_no_match(payment, db)
+
+    assert payment.status == PaymentStatus.unknown
+    db.add.assert_not_called()    # no record — email was not sent
+    db.commit.assert_awaited_once()
+
+
+# ── Email content tests ───────────────────────────────────────────────────────
 
 async def test_clarification_email_content():
     """
@@ -247,10 +339,57 @@ async def test_clarification_email_content():
     assert "Priya Sharma" in body
     assert "INR 2000" in body
     assert "priya@example.com" in body
-    assert "The Wire team" in body
+    assert "The India Cable" in body
+    assert "The India Cable team" in body
+    # Ensure old publication name is not present
+    assert "The Wire team" not in body
+    assert "The Wire's Substack" not in body
 
 
-# ── Test 9: Manual resolution validates subscriber ───────────────────────────
+async def test_send_clarification_email_no_smtp_config():
+    """
+    When SMTP_HOST or CLARIFICATION_EMAIL_FROM is unset, send_clarification_email
+    returns False immediately without attempting a network connection.
+    """
+    payment = make_payment(email="a@b.com", name="Test User", amount_inr=2000)
+
+    with patch.dict(os.environ, {
+        "SMTP_HOST": "",
+        "CLARIFICATION_EMAIL_FROM": "",
+        "SMTP_USER": "",
+        "SMTP_PASSWORD": "",
+    }):
+        with patch("services.email.smtplib.SMTP") as mock_smtp:
+            result = await send_clarification_email(payment)
+
+    assert result is False
+    mock_smtp.assert_not_called()
+
+
+async def test_send_clarification_email_smtp_failure_returns_false():
+    """
+    When SMTP is configured but the send fails (e.g. auth error),
+    send_clarification_email returns False without raising.
+    """
+    payment = make_payment(email="a@b.com", name="Test User", amount_inr=2000)
+
+    with patch.dict(os.environ, {
+        "SMTP_HOST": "smtp.example.com",
+        "CLARIFICATION_EMAIL_FROM": "noreply@example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USER": "user",
+        "SMTP_PASSWORD": "pass",
+    }):
+        with patch("services.email.smtplib.SMTP") as mock_smtp:
+            mock_smtp.return_value.__enter__.side_effect = smtplib.SMTPAuthenticationError(
+                535, b"auth failed"
+            )
+            result = await send_clarification_email(payment)
+
+    assert result is False
+
+
+# ── Manual resolution endpoint test ──────────────────────────────────────────
 
 async def test_manual_resolution_validates_subscriber():
     """

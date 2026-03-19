@@ -25,6 +25,8 @@ export default function Inbox() {
   const queryClient = useQueryClient()
   const [expandedRow, setExpandedRow] = useState(null)
   const [overrideRow, setOverrideRow] = useState(null)
+  const [rejectRow, setRejectRow] = useState(null)
+  const [rejectNotes, setRejectNotes] = useState('Could not identify payer')
 
   const { data: payments = [], isLoading, error } = useQuery({
     queryKey: ['pending'],
@@ -38,6 +40,19 @@ export default function Inbox() {
         .then((r) => r.data),
     onSuccess: () => {
       setExpandedRow(null)
+      queryClient.invalidateQueries({ queryKey: ['pending'] })
+      queryClient.invalidateQueries({ queryKey: ['summary'] })
+    },
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ paymentId, notes }) =>
+      api
+        .post(`/dashboard/reject/${paymentId}`, { notes })
+        .then((r) => r.data),
+    onSuccess: () => {
+      setRejectRow(null)
+      setRejectNotes('Could not identify payer')
       queryClient.invalidateQueries({ queryKey: ['pending'] })
       queryClient.invalidateQueries({ queryKey: ['summary'] })
     },
@@ -91,11 +106,38 @@ export default function Inbox() {
               key={p.payment_id}
               payment={p}
               expanded={expandedRow === p.payment_id}
-              onToggleExpand={() =>
-                setExpandedRow(expandedRow === p.payment_id ? null : p.payment_id)
-              }
+              onToggleExpand={() => {
+                const next = expandedRow === p.payment_id ? null : p.payment_id
+                setExpandedRow(next)
+                if (next) setRejectRow(null)
+              }}
               onOverride={() => setOverrideRow(p)}
               approveMutation={approveMutation}
+              isApproveError={
+                approveMutation.isError &&
+                approveMutation.variables?.paymentId === p.payment_id
+              }
+              approveErrorMsg={
+                approveMutation.error?.response?.data?.detail ??
+                approveMutation.error?.message
+              }
+              rejectExpanded={rejectRow === p.payment_id}
+              onToggleReject={() => {
+                const next = rejectRow === p.payment_id ? null : p.payment_id
+                setRejectRow(next)
+                if (next) setExpandedRow(null)
+              }}
+              rejectMutation={rejectMutation}
+              isRejectError={
+                rejectMutation.isError &&
+                rejectMutation.variables?.paymentId === p.payment_id
+              }
+              rejectErrorMsg={
+                rejectMutation.error?.response?.data?.detail ??
+                rejectMutation.error?.message
+              }
+              rejectNotes={rejectRow === p.payment_id ? rejectNotes : ''}
+              onRejectNotesChange={setRejectNotes}
               TD={TD}
             />
           ))}
@@ -113,7 +155,23 @@ export default function Inbox() {
   )
 }
 
-function PaymentRows({ payment: p, expanded, onToggleExpand, onOverride, approveMutation, TD }) {
+function PaymentRows({
+  payment: p,
+  expanded,
+  onToggleExpand,
+  onOverride,
+  approveMutation,
+  isApproveError,
+  approveErrorMsg,
+  rejectExpanded,
+  onToggleReject,
+  rejectMutation,
+  isRejectError,
+  rejectErrorMsg,
+  rejectNotes,
+  onRejectNotesChange,
+  TD,
+}) {
   const isReview = p.status === 'needs_review'
   const hasMatch = !!p.suggested_match
 
@@ -155,6 +213,12 @@ function PaymentRows({ payment: p, expanded, onToggleExpand, onOverride, approve
           >
             {p.status === 'unknown' ? 'RESOLVE' : 'OVERRIDE'}
           </button>
+          <button
+            onClick={onToggleReject}
+            className="font-condensed text-xs tracking-widest border border-red-900/50 px-3 py-1 text-red-800 hover:border-red-700 hover:text-red-500"
+          >
+            REJECT
+          </button>
         </td>
       </tr>
 
@@ -175,9 +239,9 @@ function PaymentRows({ payment: p, expanded, onToggleExpand, onOverride, approve
                 </p>
               </div>
               <div className="flex gap-3">
-                {approveMutation.isError && (
+                {isApproveError && (
                   <p className="font-mono text-xs text-red-500 self-center">
-                    {approveMutation.error?.message}
+                    {approveErrorMsg}
                   </p>
                 )}
                 <button
@@ -194,6 +258,57 @@ function PaymentRows({ payment: p, expanded, onToggleExpand, onOverride, approve
                 </button>
                 <button
                   onClick={onToggleExpand}
+                  className="font-condensed text-xs tracking-widest border border-gray-700 px-4 py-2 text-gray-500 hover:text-gray-300"
+                >
+                  CANCEL
+                </button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {/* Inline reject panel */}
+      {rejectExpanded && (
+        <tr className="border-b border-gray-800 bg-[#111]">
+          <td colSpan={6} className="px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="font-mono space-y-2">
+                <p className="text-[10px] text-gray-600 tracking-widest">REJECT PAYMENT</p>
+                <p className="text-xs text-gray-500">
+                  Payment will be marked failed and removed from the inbox.
+                </p>
+                <div className="flex items-center gap-3 mt-1">
+                  <label className="font-condensed text-[10px] tracking-widest text-gray-600 whitespace-nowrap">
+                    NOTES
+                  </label>
+                  <input
+                    value={rejectNotes}
+                    onChange={(e) => onRejectNotesChange(e.target.value)}
+                    className="bg-transparent border border-gray-700 px-2 py-1 font-mono text-xs text-gray-300 focus:outline-none focus:border-gray-500 w-72"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                {isRejectError && (
+                  <p className="font-mono text-xs text-red-500 self-center">
+                    {rejectErrorMsg}
+                  </p>
+                )}
+                <button
+                  onClick={() =>
+                    rejectMutation.mutate({
+                      paymentId: p.payment_id,
+                      notes: rejectNotes || 'Rejected from dashboard',
+                    })
+                  }
+                  disabled={rejectMutation.isPending}
+                  className="font-condensed text-xs tracking-widest bg-red-800 text-white px-5 py-2 hover:bg-red-700 disabled:opacity-40"
+                >
+                  {rejectMutation.isPending ? 'REJECTING...' : 'CONFIRM REJECT'}
+                </button>
+                <button
+                  onClick={onToggleReject}
                   className="font-condensed text-xs tracking-widest border border-gray-700 px-4 py-2 text-gray-500 hover:text-gray-300"
                 >
                   CANCEL

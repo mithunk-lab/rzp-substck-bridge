@@ -121,20 +121,22 @@ async def _tier2_fuzzy_name(payment: Payment, db: AsyncSession) -> bool:
 
 async def _tier3_no_match(payment: Payment, db: AsyncSession) -> None:
     """
-    No match found. Sets status=unknown, sends a clarification email to the
-    payer, and writes a record to clarification_emails for dashboard tracking.
+    No match found. Sets status=unknown, attempts to send a clarification email
+    to the payer, and writes a ClarificationEmail record only if the email was
+    successfully delivered. If SMTP is not configured or the send fails, the
+    status is still set to unknown but no record is written.
     """
     payment.status = PaymentStatus.unknown
 
     email_sent = await send_clarification_email(payment)
-    if not email_sent:
-        payment.resolution_notes = "clarification email failed"
+    if email_sent:
+        db.add(ClarificationEmail(
+            payment_id=payment.id,
+            sent_to_email=payment.email,
+            sent_at=datetime.now(timezone.utc),
+        ))
+        logger.info("Tier 3: no match for %s, clarification email sent", payment.id)
+    else:
+        logger.info("Tier 3: no match for %s, clarification email not sent", payment.id)
 
-    db.add(ClarificationEmail(
-        payment_id=payment.id,
-        sent_to_email=payment.email,
-        sent_at=datetime.now(timezone.utc),
-    ))
     await db.commit()
-
-    logger.info("Tier 3: no match for %s, clarification sent", payment.id)

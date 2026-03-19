@@ -172,7 +172,7 @@ export default function OverrideModal({ payment, onClose, onSuccess }) {
             )}
             {approveMutation.isError && (
               <p className="font-mono text-xs text-red-500 mt-1">
-                ERROR: {approveMutation.error?.message}
+                ERROR: {approveMutation.error?.response?.data?.detail ?? approveMutation.error?.message}
               </p>
             )}
           </div>

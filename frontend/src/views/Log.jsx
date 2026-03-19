@@ -47,6 +47,8 @@ export default function Log() {
   })
   const [page, setPage] = useState(1)
   const [expandedRow, setExpandedRow] = useState(null)
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportError, setExportError] = useState(null)
 
   const params = {
     page,
@@ -60,7 +62,7 @@ export default function Log() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['log', params],
     queryFn: () => api.get('/dashboard/log', { params }).then((r) => r.data),
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   })
 
   function handleFilterChange(key, value) {
@@ -69,16 +71,16 @@ export default function Log() {
   }
 
   function handleExport() {
-    const exportParams = new URLSearchParams()
-    const key = localStorage.getItem('bridge_api_key')
-    if (filters.status) exportParams.set('status', filters.status)
-    if (filters.email) exportParams.set('email', filters.email)
-    if (filters.date_from) exportParams.set('date_from', filters.date_from)
-    if (filters.date_to) exportParams.set('date_to', filters.date_to)
+    const exportParams = {}
+    if (filters.status) exportParams.status = filters.status
+    if (filters.email) exportParams.email = filters.email
+    if (filters.date_from) exportParams.date_from = filters.date_from
+    if (filters.date_to) exportParams.date_to = filters.date_to
 
-    // Use a temporary anchor with the auth header baked into a fetch download
+    setExportLoading(true)
+    setExportError(null)
     api
-      .get('/dashboard/log/export', { params: Object.fromEntries(exportParams), responseType: 'blob' })
+      .get('/dashboard/log/export', { params: exportParams, responseType: 'blob' })
       .then((r) => {
         const url = URL.createObjectURL(r.data)
         const a = document.createElement('a')
@@ -87,6 +89,10 @@ export default function Log() {
         a.click()
         URL.revokeObjectURL(url)
       })
+      .catch((err) => {
+        setExportError(err.response?.data?.detail ?? err.message ?? 'Export failed')
+      })
+      .finally(() => setExportLoading(false))
   }
 
   const items = data?.items ?? []
@@ -98,12 +104,18 @@ export default function Log() {
       {/* Page header */}
       <div className="mb-5 flex items-center justify-between">
         <h1 className="font-condensed text-2xl tracking-[0.2em] text-white">LOG</h1>
-        <button
-          onClick={handleExport}
-          className="font-condensed text-xs tracking-widest border border-gray-700 px-4 py-1.5 text-gray-400 hover:border-gray-500 hover:text-gray-200"
-        >
-          EXPORT CSV
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={handleExport}
+            disabled={exportLoading}
+            className="font-condensed text-xs tracking-widest border border-gray-700 px-4 py-1.5 text-gray-400 hover:border-gray-500 hover:text-gray-200 disabled:opacity-40"
+          >
+            {exportLoading ? 'EXPORTING...' : 'EXPORT CSV'}
+          </button>
+          {exportError && (
+            <p className="font-mono text-[10px] text-red-500">{exportError}</p>
+          )}
+        </div>
       </div>
 
       {/* Filter bar */}
